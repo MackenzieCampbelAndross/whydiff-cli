@@ -5,6 +5,9 @@ import { CliError } from "../errors/cli-error.js";
 export interface DiffCommandOptions {
   config?: string;
   verbose?: boolean;
+  openapiBaseline?: string;
+  openapiCandidate?: string;
+  authProfile?: string;
 }
 
 export async function runDiff(revisionRange: string, options: DiffCommandOptions = {}): Promise<number> {
@@ -24,7 +27,10 @@ export async function runDiff(revisionRange: string, options: DiffCommandOptions
     report = await engine.execute({
       config: loaded.config,
       rootDir: loaded.rootDir,
-      revisionRange
+      revisionRange,
+      openapiBaseline: options.openapiBaseline,
+      openapiCandidate: options.openapiCandidate,
+      authProfile: options.authProfile
     });
   } catch (err: unknown) {
     throw new CliError(`Diff execution failed: ${(err as Error).message}`, 2);

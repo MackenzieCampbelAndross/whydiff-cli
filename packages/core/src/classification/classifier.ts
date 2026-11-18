@@ -1,6 +1,6 @@
 import { Observation } from "../observations/types.js";
 import { ValueDifference } from "../comparison/types.js";
-import { BehavioralDelta, DeltaSeverity } from "./types.js";
+import { BehavioralDelta, CompatibilityVerdict, DeltaSeverity } from "./types.js";
 
 export function classifyDelta(
   index: number,
@@ -10,21 +10,26 @@ export function classifyDelta(
 ): BehavioralDelta {
   const id = `bd_${String(index + 1).padStart(3, "0")}`;
   const severity = determineSeverity(before, after, differences);
-  const title = generateTitle(before, after, differences, severity);
-  const evidence = generateEvidence(before, after, differences);
+  const verdict = determineVerdict(severity, before, after);
+  const title = generateTitle(before, after, differences, severity, verdict);
+  const evidence = generateEvidence(before, after, differences, verdict);
 
   return {
     id,
     title,
     severity,
-    confidence: 1.0, // Observed deterministic execution
+    confidence: severity === "unverified" ? 0.5 : 1.0,
     surface: ["http"],
     before,
     after,
     differences,
     evidence,
-    affectedCode: [], // Source attribution not implemented in Phase 0
-    createdAt: new Date().toISOString()
+    affectedCode: [],
+    createdAt: new Date().toISOString(),
+    verdict,
+    motivatedBy: after.motivatedBy || before.motivatedBy,
+    category: after.category || before.category,
+    intent: after.intent || before.intent
   };
 }
 
@@ -33,7 +38,12 @@ function determineSeverity(
   after: Observation,
   differences: ValueDifference[]
 ): DeltaSeverity {
-  // Check execution failure in candidate
+  // If baseline had execution failure/timeout, we cannot verify baseline expectation
+  if (before.error && !before.response) {
+    return "unverified";
+  }
+
+  // If candidate had execution failure/timeout
   if (!before.error && after.error) {
     return "breaking";
   }
@@ -43,7 +53,24 @@ function determineSeverity(
 
   // Endpoint was 2xx, now is 4xx or 5xx
   if (beforeStatus !== undefined && afterStatus !== undefined) {
+    // If probe was deliberately invalid to test validation (intent: validation_error)
+    if (after.category === "invalid" || after.intent === "validation_error") {
+      // If candidate returns 400 (proper validation) and baseline returned 500 (crash), this is an improvement
+      if (beforeStatus === 500 && afterStatus === 400) {
+        return "changed";
+      }
+      // If candidate returns 200 (accepted bad input!) but baseline returned 400, that is risky/breaking
+      if (beforeStatus === 400 && afterStatus === 200) {
+        return "risky";
+      }
+    }
+
     if (beforeStatus >= 200 && beforeStatus < 300 && afterStatus >= 400) {
+      return "breaking";
+    }
+
+    // Auth differences: 200 -> 401/403 or 401 -> 403
+    if (beforeStatus === 200 && (afterStatus === 401 || afterStatus === 403)) {
       return "breaking";
     }
   }
@@ -70,7 +97,6 @@ function determineSeverity(
   }
 
   if (hasRemoval) {
-    // If response was successful (2xx), removing fields is breaking
     if (beforeStatus && beforeStatus >= 200 && beforeStatus < 300) {
       return "breaking";
     }
@@ -78,7 +104,6 @@ function determineSeverity(
   }
 
   if (hasStatusChange) {
-    // Status changed within 2xx range (e.g. 200 -> 201) or other changes
     return "risky";
   }
 
@@ -89,17 +114,47 @@ function determineSeverity(
   return "informational";
 }
 
+function determineVerdict(
+  severity: DeltaSeverity,
+  before: Observation,
+  after: Observation
+): CompatibilityVerdict {
+  const motivatedBy = after.motivatedBy || before.motivatedBy;
+
+  if (severity === "unverified") {
+    return "unverified_risk";
+  }
+
+  if (motivatedBy) {
+    if (severity === "breaking" || severity === "risky") {
+      return "confirmed_regression";
+    }
+    return "contract_incompatibility";
+  }
+
+  if (severity === "breaking") {
+    return "runtime_divergence";
+  }
+
+  return "compatible_behavior";
+}
+
 function generateTitle(
   before: Observation,
   after: Observation,
   differences: ValueDifference[],
-  severity: DeltaSeverity
+  severity: DeltaSeverity,
+  verdict: CompatibilityVerdict
 ): string {
   const method = after.request.method || before.request.method;
   const path = after.request.path || before.request.path;
 
+  if (severity === "unverified") {
+    return `${method} ${path} - Execution unverified (${before.error?.message || "inconclusive probe"})`;
+  }
+
   if (!before.error && after.error) {
-    return `${method} ${path} - Endpoint execution failed in candidate`;
+    return `${method} ${path} - Endpoint execution failed in candidate (${after.error.message})`;
   }
 
   if (before.response && after.response && before.response.statusCode !== after.response.statusCode) {
@@ -132,12 +187,20 @@ function generateTitle(
 function generateEvidence(
   before: Observation,
   after: Observation,
-  differences: ValueDifference[]
+  differences: ValueDifference[],
+  verdict: CompatibilityVerdict
 ): string[] {
   const evidence: string[] = [];
 
   evidence.push(`Probe ID: ${before.probeId}`);
   evidence.push(`Request: ${before.request.method} ${before.request.path}`);
+  if (after.category) {
+    evidence.push(`Category: ${after.category} (${after.intent || "general"})`);
+  }
+  if (after.motivatedBy) {
+    evidence.push(`Contract Delta Reference: ${after.motivatedBy}`);
+    evidence.push(`Verdict: ${verdict}`);
+  }
 
   if (before.response) {
     evidence.push(`Baseline response: HTTP ${before.response.statusCode}`);
@@ -149,6 +212,13 @@ function generateEvidence(
     evidence.push(`Candidate response: HTTP ${after.response.statusCode}`);
   } else if (after.error) {
     evidence.push(`Candidate error: ${after.error.message}`);
+  }
+
+  if (after.retryLog && after.retryLog.length > 0) {
+    evidence.push(`Reliability: ${after.attempts || 1} attempt(s) made`);
+    for (const log of after.retryLog) {
+      evidence.push(`  Retry: ${log}`);
+    }
   }
 
   for (const diff of differences) {

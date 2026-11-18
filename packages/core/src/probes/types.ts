@@ -21,7 +21,11 @@ export const HttpProbeSchema = z.object({
   query: z.record(z.string()).optional(),
   payload: z.unknown().optional(),
   tags: z.array(z.string()).optional(),
-  timeoutMs: z.number().int().positive().optional()
+  timeoutMs: z.number().int().positive().optional(),
+  category: z.enum(["valid", "invalid"]).optional(),
+  intent: z.enum(["success", "validation_error", "auth_error", "differential"]).optional(),
+  motivatedBy: z.string().optional(),
+  sourcePath: z.string().optional()
 });
 
 export type HttpProbe = z.infer<typeof HttpProbeSchema>;

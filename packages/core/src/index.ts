@@ -6,6 +6,25 @@ export * from "./config/generator.js";
 // Probes
 export * from "./probes/types.js";
 export * from "./probes/loader.js";
+export * from "./probes/generator/schema-sampler.js";
+export * from "./probes/generator/generator.js";
+export * from "./probes/generator/differential.js";
+
+// OpenAPI
+export * from "./openapi/types.js";
+export * from "./openapi/parser.js";
+export * from "./openapi/differ.js";
+export * from "./openapi/inspector.js";
+
+// Auth
+export * from "./auth/types.js";
+export * from "./auth/resolver.js";
+export * from "./auth/injector.js";
+export * from "./auth/redactor.js";
+
+// Reliability
+export * from "./reliability/types.js";
+export * from "./reliability/idempotency.js";
 
 // Git
 export * from "./git/types.js";

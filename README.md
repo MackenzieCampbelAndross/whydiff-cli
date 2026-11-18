@@ -13,8 +13,9 @@ By executing equivalent HTTP probes against isolated baseline and candidate revi
 1. **Evidence over assumptions**: Every detected behavioral difference links directly to executed HTTP probes.
 2. **Actual execution over speculative analysis**: No static guesswork; code is executed under controlled isolation.
 3. **Reproducibility**: Analysis runs capture complete metadata, inputs, and outputs in structured JSON reports.
-4. **Deterministic comparison**: Canonical JSON key ordering and volatile header filtering eliminate false positives.
-5. **Developer experience**: Clean terminal output with actionable severity rankings.
+4. **Deterministic comparison**: Canonical JSON key ordering, volatile header filtering, and secret redaction eliminate false positives and leaks.
+5. **Contract vs Runtime awareness**: Clear distinction between contract changes, runtime behavioral changes, and compatibility risks.
+6. **Developer experience**: Clean terminal output with actionable severity rankings and verdict tags.
 
 ---
 
@@ -76,28 +77,7 @@ export async function buildApp() {
 }
 ```
 
-### Step 3: Define HTTP Probes in `.whydiff/probes.json`
-
-```json
-{
-  "probes": [
-    {
-      "id": "health-check",
-      "name": "Health check",
-      "method": "GET",
-      "path": "/health"
-    },
-    {
-      "id": "get-user",
-      "name": "Retrieve user profile",
-      "method": "GET",
-      "path": "/users/123"
-    }
-  ]
-}
-```
-
-### Step 4: Run Behavioral Diff
+### Step 3: Run Behavioral Diff
 
 ```bash
 whydiff diff main..HEAD
@@ -105,37 +85,101 @@ whydiff diff main..HEAD
 
 ---
 
-## 5. CLI Command Reference
+## 5. Phase 1 Capabilities
+
+### A. OpenAPI Contract Intelligence
+WHYDIFF parses and compares OpenAPI 3.0 and 3.1 specifications in JSON or YAML format:
+- Resolves internal `$ref` schema references and parameter pointers.
+- Identifies breaking changes: removed endpoints, newly required request fields, removed response fields, incompatible type changes, removed status codes, and altered authentication requirements.
+- Identifies compatible changes: added endpoints, relaxed requirements, and optional query parameters.
+
+```bash
+# Inspect an OpenAPI specification
+whydiff contract inspect ./openapi.json
+whydiff contract inspect ./openapi.yaml --json
+
+# Compare two OpenAPI specifications
+whydiff contract diff ./openapi-base.json ./openapi-cand.yaml
+```
+
+### B. Schema-Aware Probe Generation
+WHYDIFF synthesizes deterministic HTTP probes directly from OpenAPI contracts:
+- Generates valid happy-path requests matching schema constraints.
+- Generates negative boundary probes (missing required fields, invalid types, enum violations).
+- Automatically substitutes path parameters and required query parameters.
+
+```bash
+# Generate probes to stdout or disk
+whydiff probe generate ./openapi.yaml
+whydiff probe generate ./openapi.yaml --output .whydiff/probes.json
+whydiff probe list
+```
+
+### C. Differential Probing
+When comparing two revisions with OpenAPI contracts, WHYDIFF automatically generates targeted probes motivated by contract changes to confirm whether contract changes translate into actual runtime regressions.
+
+```bash
+whydiff diff main..HEAD --openapi-baseline ./openapi-v1.json --openapi-candidate ./openapi-v2.yaml
+```
+
+### D. Authentication & Authorization Profiles
+Configure authentication schemes in `.whydiff.toml`:
+- **Bearer Tokens**: `token = "${API_TOKEN}"` or `token = "env:API_TOKEN"`
+- **API Keys**: `name = "x-api-key"`, `value = "${SECRET_KEY}"`, `in = "header"` or `"query"`
+- **Basic Auth**: `username = "admin"`, `password = "${PASSWORD}"`
+- **Custom Headers**: Injected custom authentication headers
+- **Secret Redaction**: Automatic zero-leak sanitization in console logs, evidence records, and normalizers.
+
+```bash
+# Validate configured credentials
+whydiff auth validate
+whydiff auth validate staging
+```
+
+### E. HTTP Reliability & Error Semantics
+- **Idempotency Protection**: Safe methods (`GET`, `HEAD`, `PUT`, `DELETE`, `OPTIONS`) are eligible for retry; non-idempotent methods (`POST`, `PATCH`) are protected against duplicate side effects unless explicitly configured.
+- **Exponential Backoff**: Jittered exponential backoff handles transient network latency and server warmups.
+- **Malformed JSON Handling**: Non-JSON payloads and HTML error pages are captured as raw strings without crashing.
+
+---
+
+## 6. CLI Command Reference
 
 | Command | Description |
 |---|---|
-| `whydiff init [dir]` | Initialize a `.whydiff.toml` and `.whydiff/probes.json` in the target directory |
+| `whydiff init [dir]` | Initialize `.whydiff.toml` and `.whydiff/probes.json` in the target directory |
 | `whydiff diff <revisions>` | Run behavioral comparison between two Git revisions (e.g. `main..HEAD`) |
 | `whydiff behavior <revisions>` | Run probes and output detailed technical comparison including payloads |
 | `whydiff explain <delta-id>` | Display ground-truth evidence and breakdown for a specific delta |
 | `whydiff report [--format=json]` | View or export the latest analysis run in terminal or JSON format |
 | `whydiff ci [--fail-on=breaking]` | Execute behavioral diff in CI and enforce exit code policies |
+| `whydiff contract inspect <spec>` | Inspect an OpenAPI 3.0 / 3.1 JSON or YAML specification |
+| `whydiff contract diff <base> <cand>` | Compare two OpenAPI specifications and identify schema deltas |
+| `whydiff probe generate <spec>` | Generate schema-derived HTTP probes from an OpenAPI specification |
+| `whydiff probe list` | List configured probes in `.whydiff.toml` |
+| `whydiff auth validate [profile]` | Validate authentication credentials and environment variable secrets |
 
 ---
 
-## 6. Severity Classification
+## 7. Severity & Compatibility Verdicts
 
-- **BREAKING**:
-  - Previously successful (2xx) endpoint becomes an error (4xx / 5xx) or fails.
-  - A required response field is removed from a successful response.
-  - A response field changes data types (e.g., `number` to `string`).
-- **RISKY**:
-  - HTTP status code changes within the successful range (e.g., `201` to `200`).
-- **CHANGED**:
-  - Response field value altered.
-  - Response header changed (e.g. `cache-control`).
-  - Optional response field added.
-- **INFORMATIONAL**:
-  - Minor non-breaking additions or configuration-level changes.
+Deltas are ranked by severity:
+- **BREAKING**: Previously successful (2xx) endpoint becomes an error, required field removed, or incompatible type change.
+- **RISKY**: Status code changes within success range (e.g. 201 to 200).
+- **CHANGED**: Safe value or header modifications.
+- **INFORMATIONAL**: Compatible metadata changes.
+- **UNVERIFIED**: Candidate endpoint timed out, crashed, or could not be verified.
+
+Each delta is labeled with a **Compatibility Verdict**:
+- `confirmed_regression`: Runtime execution confirmed a breaking behavioral regression.
+- `contract_incompatibility`: Contract delta broke compatibility with client expectations.
+- `runtime_divergence`: Runtime behavior diverged across revisions.
+- `unverified_risk`: Failure or timeout prevented full verification.
+- `compatible_behavior`: Change is safe and non-breaking.
 
 ---
 
-## 7. CI Integration
+## 8. CI Integration
 
 Integrate WHYDIFF into GitHub Actions:
 
@@ -167,23 +211,15 @@ jobs:
 
 ### Standard Exit Codes:
 - `0`: Analysis passed without breaking changes.
-- `1`: Behavioral regressions detected according to the configured `--fail-on` policy.
+- `1`: Behavioral or contract regressions detected according to the configured policy.
 - `2`: Configuration, Git, or analysis infrastructure error.
 
 ---
 
-## 8. Current Limitations (Phase 0)
+## 9. Current Scope & Roadmap
 
-1. **Framework Support**: Fastify is the only supported framework in Phase 0.
-2. **Surface**: HTTP request/response inspection via Fastify `inject()`.
-3. **Probes**: Configured manually in `.whydiff/probes.json`.
-4. **Source Attribution**: Mapping deltas to exact lines of code is reserved for future phases.
-
----
-
-## 9. Roadmap
-
-- **Phase 1**: Automated probe synthesis and OpenAPI / TypeScript schema inference.
-- **Phase 2**: Express, NestJS, and Next.js application adapters.
+- **Phase 0 (Completed)**: Core execution engine, Fastify inject adapter, worktree isolation, delta classification, and reporting.
+- **Phase 1 (Completed)**: OpenAPI 3.0/3.1 contract intelligence, schema-aware probe generation, authentication injection, secret redaction, and reliability retries.
+- **Phase 2 (Upcoming)**: Express, NestJS, and Next.js application adapters; multi-step session workflows.
 - **Phase 3**: Database state isolation and external mock recording / replay.
 - **Phase 4**: Cryptographic evidence signing and behavioral verification attestations.

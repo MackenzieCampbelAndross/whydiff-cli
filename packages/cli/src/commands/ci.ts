@@ -6,6 +6,9 @@ export interface CiCommandOptions {
   candidate?: string;
   failOn?: "breaking" | "risky" | "changed" | "never";
   config?: string;
+  openapiBaseline?: string;
+  openapiCandidate?: string;
+  authProfile?: string;
 }
 
 export async function runCi(options: CiCommandOptions = {}): Promise<number> {
@@ -29,7 +32,10 @@ export async function runCi(options: CiCommandOptions = {}): Promise<number> {
     report = await engine.execute({
       config: loaded.config,
       rootDir: loaded.rootDir,
-      revisionRange
+      revisionRange,
+      openapiBaseline: options.openapiBaseline,
+      openapiCandidate: options.openapiCandidate,
+      authProfile: options.authProfile
     });
   } catch (err: unknown) {
     throw new CliError(`CI execution failed: ${(err as Error).message}`, 2);

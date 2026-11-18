@@ -1,9 +1,11 @@
 import { z } from "zod";
+import { AuthConfigSchema } from "../auth/types.js";
+import { ReliabilityConfigSchema } from "../reliability/types.js";
 
 export const ProjectConfigSchema = z.object({
   name: z.string().min(1, "Project name cannot be empty"),
   framework: z.enum(["fastify"], {
-    errorMap: () => ({ message: "Only 'fastify' is supported in Phase 0" })
+    errorMap: () => ({ message: "Only 'fastify' is supported in Phase 0 & Phase 1" })
   })
 });
 
@@ -31,8 +33,22 @@ export const ExecutionConfigSchema = z.object({
   cleanup_worktrees: z.boolean().default(true)
 });
 
+export const ProbeGenerationConfigSchema = z.object({
+  enabled: z.boolean().default(false),
+  max_per_endpoint: z.number().int().positive().default(6),
+  include_invalid: z.boolean().default(true),
+  max_depth: z.number().int().positive().default(4)
+});
+
 export const ProbesConfigSchema = z.object({
-  file: z.string().default(".whydiff/probes.json")
+  file: z.string().default(".whydiff/probes.json"),
+  generation: ProbeGenerationConfigSchema.default({})
+});
+
+export const OpenApiConfigSchema = z.object({
+  spec: z.string().optional(),
+  baseline: z.string().optional(),
+  candidate: z.string().optional()
 });
 
 export const ReportConfigSchema = z.object({
@@ -51,6 +67,9 @@ export const WhydiffConfigSchema = z.object({
   comparison: ComparisonConfigSchema.default({}),
   execution: ExecutionConfigSchema.default({}),
   probes: ProbesConfigSchema.default({}),
+  openapi: OpenApiConfigSchema.optional(),
+  auth: AuthConfigSchema.default({}),
+  reliability: ReliabilityConfigSchema.default({}),
   report: ReportConfigSchema.default({}),
   ci: CiConfigSchema.default({})
 });
@@ -61,5 +80,6 @@ export type ApplicationConfig = z.infer<typeof ApplicationConfigSchema>;
 export type ComparisonConfig = z.infer<typeof ComparisonConfigSchema>;
 export type ExecutionConfig = z.infer<typeof ExecutionConfigSchema>;
 export type ProbesConfig = z.infer<typeof ProbesConfigSchema>;
+export type OpenApiConfig = z.infer<typeof OpenApiConfigSchema>;
 export type ReportConfig = z.infer<typeof ReportConfigSchema>;
 export type CiConfig = z.infer<typeof CiConfigSchema>;

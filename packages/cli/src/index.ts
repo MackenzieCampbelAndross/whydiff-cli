@@ -4,4 +4,7 @@ export * from "./commands/behavior.js";
 export * from "./commands/explain.js";
 export * from "./commands/report.js";
 export * from "./commands/ci.js";
+export * from "./commands/contract.js";
+export * from "./commands/probe.js";
+export * from "./commands/auth.js";
 export * from "./errors/cli-error.js";

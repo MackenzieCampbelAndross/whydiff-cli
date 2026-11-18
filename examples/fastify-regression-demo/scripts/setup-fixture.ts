@@ -42,11 +42,16 @@ export async function setupDemoRepository(targetDir?: string): Promise<{ repoDir
   const probesConfig = await fs.readFile(path.join(demoRoot, ".whydiff", "probes.json"), "utf-8");
   const tomlConfig = await fs.readFile(path.join(demoRoot, ".whydiff.toml"), "utf-8");
   const pkgJson = await fs.readFile(path.join(demoRoot, "package.json"), "utf-8");
+  const openapiBaseline = await fs.readFile(path.join(demoRoot, "openapi-baseline.json"), "utf-8");
+  const openapiCandidate = await fs.readFile(path.join(demoRoot, "openapi-candidate.yaml"), "utf-8");
 
   await fs.writeFile(path.join(repoDir, "src", "app.ts"), baselineSource, "utf-8");
   await fs.writeFile(path.join(repoDir, ".whydiff", "probes.json"), probesConfig, "utf-8");
   await fs.writeFile(path.join(repoDir, ".whydiff.toml"), tomlConfig, "utf-8");
   await fs.writeFile(path.join(repoDir, "package.json"), pkgJson, "utf-8");
+  await fs.writeFile(path.join(repoDir, "openapi.json"), openapiBaseline, "utf-8");
+  await fs.writeFile(path.join(repoDir, "openapi-baseline.json"), openapiBaseline, "utf-8");
+  await fs.writeFile(path.join(repoDir, "openapi-candidate.yaml"), openapiCandidate, "utf-8");
 
   // Link node_modules so worktree runners resolve fastify
   const nodeModulesSrc = path.resolve(demoRoot, "../../node_modules");
@@ -65,6 +70,12 @@ export async function setupDemoRepository(targetDir?: string): Promise<{ repoDir
 
   // 3. Prepare candidate files
   await fs.writeFile(path.join(repoDir, "src", "app.ts"), candidateSource, "utf-8");
+  await fs.writeFile(path.join(repoDir, "openapi.yaml"), openapiCandidate, "utf-8");
+  try {
+    await fs.rm(path.join(repoDir, "openapi.json"));
+  } catch {
+    // ignore
+  }
 
   // Commit candidate
   await runGit(["add", "."]);

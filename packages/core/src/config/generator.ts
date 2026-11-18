@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { stringify as stringifyToml } from "smol-toml";
-import { WhydiffConfig } from "./types.js";
+import { WhydiffConfig, WhydiffConfigSchema } from "./types.js";
 
 export interface InitProjectOptions {
   name?: string;
@@ -13,7 +13,7 @@ export interface InitProjectOptions {
 }
 
 export function getDefaultConfig(name = "my-service", entrypoint = "src/app.ts", exportName = "buildApp"): WhydiffConfig {
-  return {
+  return WhydiffConfigSchema.parse({
     version: 1,
     project: {
       name,
@@ -41,7 +41,24 @@ export function getDefaultConfig(name = "my-service", entrypoint = "src/app.ts",
       cleanup_worktrees: true
     },
     probes: {
-      file: ".whydiff/probes.json"
+      file: ".whydiff/probes.json",
+      generation: {
+        enabled: false,
+        max_per_endpoint: 6,
+        include_invalid: true,
+        max_depth: 4
+      }
+    },
+    auth: {
+      profiles: {}
+    },
+    reliability: {
+      max_retries: 2,
+      initial_delay_ms: 50,
+      max_delay_ms: 500,
+      backoff_factor: 2,
+      retry_on_status: [502, 503, 504],
+      retry_on_network_error: true
     },
     report: {
       directory: ".whydiff/reports",
@@ -50,7 +67,7 @@ export function getDefaultConfig(name = "my-service", entrypoint = "src/app.ts",
     ci: {
       fail_on: "breaking"
     }
-  };
+  });
 }
 
 export function generateTomlConfig(config: WhydiffConfig): string {

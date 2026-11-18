@@ -1,5 +1,12 @@
 import { HttpProbe } from "../probes/types.js";
 import { Observation } from "../observations/types.js";
+import { AuthProfile } from "../auth/types.js";
+import { ReliabilityConfig } from "../reliability/types.js";
+
+export interface AdapterExecutionOptions {
+  authProfile?: AuthProfile;
+  reliability?: ReliabilityConfig;
+}
 
 export interface AppAdapter {
   name: string;
@@ -10,6 +17,7 @@ export interface AppAdapter {
     exportName: string,
     probes: HttpProbe[],
     timeoutMs: number,
-    revisionRef: string
+    revisionRef: string,
+    options?: AdapterExecutionOptions
   ): Promise<Observation[]>;
 }

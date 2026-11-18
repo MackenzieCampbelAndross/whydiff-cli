@@ -1,4 +1,5 @@
 import { NormalizationOptions, Observation, ObservationResponse } from "./types.js";
+import { redactSensitiveData, redactErrorString, redactSensitiveUrl } from "../auth/redactor.js";
 
 const DEFAULT_SENSITIVE_HEADERS = new Set([
   "authorization",
@@ -96,7 +97,9 @@ export function normalizeObservation(
   let normalizedResponse: ObservationResponse | undefined;
 
   if (observation.response) {
-    let normalizedBody = observation.response.body;
+    let normalizedBody = observation.response.body !== undefined
+      ? observation.response.body
+      : (observation.response as unknown as Record<string, unknown>)["rawBody"];
     if (typeof normalizedBody === "string") {
       try {
         const parsed = JSON.parse(normalizedBody);
@@ -108,10 +111,25 @@ export function normalizeObservation(
       normalizedBody = canonicalizeJson(normalizedBody);
     }
 
+    if (options.redactSensitive !== false) {
+      normalizedBody = redactSensitiveData(normalizedBody, options.sensitiveFields || []);
+    }
+
     normalizedResponse = {
       statusCode: observation.response.statusCode,
       headers: normalizeHeaders(observation.response.headers, options),
-      body: normalizedBody
+      body: normalizedBody,
+      contentType: observation.response.contentType,
+      isMalformedJson: observation.response.isMalformedJson
+    };
+  }
+
+  let normalizedError = observation.error;
+  if (normalizedError && options.redactSensitive !== false) {
+    normalizedError = {
+      ...normalizedError,
+      message: redactErrorString(normalizedError.message),
+      stack: normalizedError.stack ? redactErrorString(normalizedError.stack) : undefined
     };
   }
 
@@ -121,13 +139,20 @@ export function normalizeObservation(
     timestamp: observation.timestamp,
     request: {
       method: observation.request.method,
-      path: observation.request.path,
+      path: redactSensitiveUrl(observation.request.path),
       query: observation.request.query ? (canonicalizeJson(observation.request.query) as Record<string, string>) : undefined,
       headers: observation.request.headers ? normalizeHeaders(observation.request.headers, options) : undefined,
-      payload: canonicalizeJson(observation.request.payload)
+      payload: options.redactSensitive !== false
+        ? redactSensitiveData(canonicalizeJson(observation.request.payload), options.sensitiveFields || [])
+        : canonicalizeJson(observation.request.payload)
     },
     response: normalizedResponse,
     durationMs: observation.durationMs,
-    error: observation.error ? { ...observation.error } : undefined
+    error: normalizedError,
+    attempts: observation.attempts,
+    retryLog: observation.retryLog,
+    category: observation.category,
+    intent: observation.intent,
+    motivatedBy: observation.motivatedBy
   };
 }

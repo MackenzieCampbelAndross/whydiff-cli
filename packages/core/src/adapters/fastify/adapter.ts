@@ -2,9 +2,10 @@ import path from "node:path";
 import fs from "node:fs/promises";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { AppAdapter } from "../types.js";
+import { AppAdapter, AdapterExecutionOptions } from "../types.js";
 import { HttpProbe } from "../../probes/types.js";
 import { Observation } from "../../observations/types.js";
+import { injectAuthIntoProbe } from "../../auth/injector.js";
 
 const execFileAsync = promisify(execFile);
 
@@ -21,19 +22,24 @@ export class FastifyAdapter implements AppAdapter {
     exportName: string,
     probes: HttpProbe[],
     timeoutMs: number,
-    revisionRef: string
+    revisionRef: string,
+    options: AdapterExecutionOptions = {}
   ): Promise<Observation[]> {
     const resolvedRoot = path.resolve(appRoot);
     const resolvedEntry = path.isAbsolute(entrypoint)
       ? entrypoint
       : path.resolve(resolvedRoot, entrypoint);
 
-    // Verify entrypoint exists
     try {
       await fs.stat(resolvedEntry);
     } catch {
       throw new Error(`Application entrypoint not found at ${resolvedEntry}`);
     }
+
+    // Apply auth profile to probes
+    const authenticatedProbes = probes.map(p =>
+      options.authProfile ? injectAuthIntoProbe(p, options.authProfile) : p
+    );
 
     const runnerScriptPath = path.join(resolvedRoot, `.whydiff_runner_${Date.now()}_${Math.random().toString(36).substring(2, 6)}.mjs`);
     const inputJsonPath = path.join(resolvedRoot, `.whydiff_input_${Date.now()}_${Math.random().toString(36).substring(2, 6)}.json`);
@@ -43,10 +49,18 @@ export class FastifyAdapter implements AppAdapter {
 import fs from "node:fs/promises";
 import { pathToFileURL } from "node:url";
 
+const IDEMPOTENT_METHODS = new Set(["GET", "HEAD", "PUT", "DELETE", "OPTIONS"]);
+
 async function main() {
   const inputRaw = await fs.readFile(process.argv[2], "utf-8");
   const input = JSON.parse(inputRaw);
-  const { entrypoint, exportName, probes, timeoutMs, revisionRef } = input;
+  const { entrypoint, exportName, probes, timeoutMs, revisionRef, reliability } = input;
+
+  const maxRetries = (reliability && typeof reliability.max_retries === "number") ? reliability.max_retries : 0;
+  const backoffMs = (reliability && typeof reliability.backoff_ms === "number") ? reliability.backoff_ms : 50;
+  const backoffFactor = (reliability && typeof reliability.backoff_factor === "number") ? reliability.backoff_factor : 2;
+  const retryNonIdempotent = !!(reliability && reliability.retry_non_idempotent);
+  const retryStatusCodes = (reliability && reliability.retry_status_codes) || [502, 503, 504];
 
   const observations = [];
   let app = null;
@@ -91,25 +105,72 @@ async function main() {
       };
 
       const probeTimeout = probe.timeoutMs || timeoutMs;
+      const isIdempotent = IDEMPOTENT_METHODS.has(probe.method.toUpperCase());
+      const canRetry = isIdempotent || retryNonIdempotent;
 
-      let timer = null;
-      try {
-        const timeoutPromise = new Promise((_, reject) => {
-          timer = setTimeout(() => reject(new Error("Probe execution timed out after " + probeTimeout + "ms")), probeTimeout);
-          if (timer.unref) timer.unref();
-        });
+      let attempt = 0;
+      let lastResponse = null;
+      let lastError = null;
+      let retryLog = [];
+      let currentDelay = backoffMs;
 
-        const injectPromise = app.inject(injectOpts);
-        const response = await Promise.race([injectPromise, timeoutPromise]);
-        if (timer) clearTimeout(timer);
-
-        const durationMs = Date.now() - startTime;
-
-        let parsedBody = response.body;
+      while (attempt <= maxRetries) {
+        attempt++;
+        let timer = null;
         try {
-          parsedBody = JSON.parse(response.body);
-        } catch {
-          // Keep raw string body
+          const timeoutPromise = new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error("Probe execution timed out after " + probeTimeout + "ms")), probeTimeout);
+            if (timer.unref) timer.unref();
+          });
+
+          const injectPromise = app.inject(injectOpts);
+          const response = await Promise.race([injectPromise, timeoutPromise]);
+          if (timer) clearTimeout(timer);
+
+          lastResponse = response;
+          lastError = null;
+
+          if (canRetry && attempt <= maxRetries && retryStatusCodes.includes(response.statusCode)) {
+            retryLog.push("Attempt " + attempt + ": Received HTTP " + response.statusCode + ", retrying in " + currentDelay + "ms");
+            await new Promise(r => setTimeout(r, currentDelay));
+            currentDelay *= backoffFactor;
+            continue;
+          }
+          break;
+        } catch (err) {
+          if (timer) clearTimeout(timer);
+          lastError = err;
+          lastResponse = null;
+
+          if (canRetry && attempt <= maxRetries) {
+            retryLog.push("Attempt " + attempt + ": Error " + err.message + ", retrying in " + currentDelay + "ms");
+            await new Promise(r => setTimeout(r, currentDelay));
+            currentDelay *= backoffFactor;
+            continue;
+          }
+          break;
+        }
+      }
+
+      const durationMs = Date.now() - startTime;
+
+      if (lastResponse) {
+        let parsedBody = lastResponse.body;
+        let isMalformed = false;
+        const cType = (lastResponse.headers && (lastResponse.headers["content-type"] || lastResponse.headers["Content-Type"])) || "";
+
+        if (cType.includes("application/json")) {
+          try {
+            parsedBody = JSON.parse(lastResponse.body);
+          } catch {
+            isMalformed = true;
+          }
+        } else {
+          try {
+            parsedBody = JSON.parse(lastResponse.body);
+          } catch {
+            // Keep as string
+          }
         }
 
         observations.push({
@@ -124,15 +185,24 @@ async function main() {
             payload: probe.payload
           },
           response: {
-            statusCode: response.statusCode,
-            headers: response.headers || {},
-            body: parsedBody
+            statusCode: lastResponse.statusCode,
+            headers: lastResponse.headers || {},
+            body: parsedBody,
+            contentType: cType,
+            isMalformedJson: isMalformed
           },
-          durationMs
+          durationMs,
+          attempts: attempt,
+          retryLog: retryLog.length > 0 ? retryLog : undefined,
+          category: probe.category,
+          intent: probe.intent,
+          motivatedBy: probe.motivatedBy
         });
-      } catch (probeErr) {
-        if (timer) clearTimeout(timer);
-        const durationMs = Date.now() - startTime;
+      } else {
+        const failureType = (lastError && lastError.message.includes("timed out"))
+          ? "timeout"
+          : "application_error";
+
         observations.push({
           probeId: probe.id,
           revision: revisionRef,
@@ -145,16 +215,21 @@ async function main() {
             payload: probe.payload
           },
           durationMs,
+          attempts: attempt,
+          retryLog: retryLog.length > 0 ? retryLog : undefined,
+          category: probe.category,
+          intent: probe.intent,
+          motivatedBy: probe.motivatedBy,
           error: {
-            name: probeErr.name || "Error",
-            message: probeErr.message || String(probeErr),
-            stack: probeErr.stack
+            name: lastError ? (lastError.name || "Error") : "Error",
+            message: lastError ? (lastError.message || String(lastError)) : "Unknown execution error",
+            stack: lastError?.stack,
+            failureType
           }
         });
       }
     }
   } catch (initErr) {
-    // If the entire application fails to initialize or import
     for (const probe of probes) {
       observations.push({
         probeId: probe.id,
@@ -167,10 +242,14 @@ async function main() {
           headers: probe.headers,
           payload: probe.payload
         },
+        category: probe.category,
+        intent: probe.intent,
+        motivatedBy: probe.motivatedBy,
         error: {
           name: initErr.name || "InitializationError",
           message: initErr.message || String(initErr),
-          stack: initErr.stack
+          stack: initErr.stack,
+          failureType: "application_error"
         }
       });
     }
@@ -200,9 +279,10 @@ main().catch(err => {
           {
             entrypoint: resolvedEntry,
             exportName,
-            probes,
+            probes: authenticatedProbes,
             timeoutMs,
-            revisionRef
+            revisionRef,
+            reliability: options.reliability
           },
           null,
           2
@@ -210,10 +290,9 @@ main().catch(err => {
         "utf-8"
       );
 
-      // Execute runner in worker subprocess
       await execFileAsync("node", [runnerScriptPath, inputJsonPath, outputJsonPath], {
         cwd: resolvedRoot,
-        timeout: Math.max(timeoutMs * probes.length + 15000, 30000),
+        timeout: Math.max(timeoutMs * probes.length * 3 + 15000, 45000),
         windowsHide: true,
         env: {
           ...process.env,
@@ -228,7 +307,6 @@ main().catch(err => {
       const details = execError.stderr ? `\nStderr: ${execError.stderr.trim()}` : "";
       throw new Error(`Failed to execute Fastify probes: ${execError.message}${details}`);
     } finally {
-      // Clean up temporary runner files
       await fs.rm(runnerScriptPath, { force: true }).catch(() => {});
       await fs.rm(inputJsonPath, { force: true }).catch(() => {});
       await fs.rm(outputJsonPath, { force: true }).catch(() => {});

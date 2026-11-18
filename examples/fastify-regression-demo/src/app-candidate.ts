@@ -49,5 +49,14 @@ export async function buildApp(): Promise<FastifyInstance> {
     throw new Error("Billing database connection error");
   });
 
+  // 7. Secure profile (requires API Key header in candidate)
+  app.get("/secure/profile", async (request, reply) => {
+    const apiKey = request.headers["x-api-key"];
+    if (!apiKey || apiKey !== "secret-key-123") {
+      return reply.status(401).send({ error: "API key required" });
+    }
+    return { user: "alice", role: "admin" };
+  });
+
   return app;
 }

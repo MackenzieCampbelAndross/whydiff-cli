@@ -1,5 +1,6 @@
 import { RunReport } from "../evidence/types.js";
 import { BehavioralDelta } from "../classification/types.js";
+import { ContractDiffResult } from "../openapi/types.js";
 
 export function formatBanner(): string {
   return [
@@ -7,12 +8,12 @@ export function formatBanner(): string {
     "  \\ \\      / / \\ \\ / / |  ____| |  __ \\",
     "   \\ \\ /\\ / /   \\ V /  | |__    | |__) |",
     "    \\ V  V /     > <   |  __|   |  _  /",
-    "     \\_/\\_/     /_/\\_\\ | |____  | | \\ \\",
+    "     \\_/\\_/     /_/\\_\\ | |____  | |  / /",
     "                         |______| |_|  \\_\\",
     "",
-    "  WHYDIFF v0.1.0",
+    "  WHYDIFF v0.1.0 / v0.2.0",
     "  Behavioral Change Detection & Verification",
-    "  -------------------------------------------"
+    "  -----------------------------------------------"
   ].join("\n");
 }
 
@@ -27,17 +28,32 @@ export function formatDiffReport(report: RunReport, options: { verbose?: boolean
   lines.push("");
   lines.push(`  APPLICATION    ${metadata.project.name}`);
   lines.push(`  FRAMEWORK      ${metadata.project.framework}`);
+
+  if (report.contractDiff) {
+    lines.push("");
+    lines.push("  OPENAPI CONTRACT DIFFERENCE");
+    lines.push(`    Breaking Changes     ${report.contractDiff.breakingCount}`);
+    lines.push(`    Risky Changes        ${report.contractDiff.riskyCount}`);
+    lines.push(`    Compatible Changes   ${report.contractDiff.changedCount}`);
+  }
+
   lines.push("");
   lines.push("  PROBES");
   lines.push(`    Executed             ${metadata.statistics.probeCount}`);
   lines.push(`    Successful           ${metadata.statistics.successfulProbes}`);
   lines.push(`    Failed                 ${metadata.statistics.failedProbes}`);
+  if (metadata.statistics.retriedProbes) {
+    lines.push(`    Retried              ${metadata.statistics.retriedProbes}`);
+  }
   lines.push("");
   lines.push("  BEHAVIORAL DELTAS");
   lines.push(`    Breaking               ${metadata.statistics.breakingCount}`);
   lines.push(`    Risky                  ${metadata.statistics.riskyCount}`);
   lines.push(`    Changed                ${metadata.statistics.changedCount}`);
   lines.push(`    Informational          ${metadata.statistics.informationalCount}`);
+  if (metadata.statistics.unverifiedCount) {
+    lines.push(`    Unverified             ${metadata.statistics.unverifiedCount}`);
+  }
   lines.push("");
   lines.push("  -------------------------------------------");
 
@@ -48,9 +64,13 @@ export function formatDiffReport(report: RunReport, options: { verbose?: boolean
   } else {
     for (const delta of deltas) {
       lines.push("");
-      lines.push(`  [${delta.severity.toUpperCase()}] ${delta.id}`);
+      const tag = delta.verdict ? `[${delta.severity.toUpperCase()} | ${delta.verdict.toUpperCase().replace(/_/g, " ")}]` : `[${delta.severity.toUpperCase()}]`;
+      lines.push(`  ${tag} ${delta.id}`);
       lines.push("");
       lines.push(`  ${delta.before.request.method} ${delta.before.request.path}`);
+      if (delta.motivatedBy) {
+        lines.push(`  Motivated By: ${delta.motivatedBy}`);
+      }
       lines.push("");
 
       // Highlight key differences
@@ -124,6 +144,9 @@ export function formatBehaviorReport(report: RunReport): string {
     const cand = report.candidateObservations.find(c => c.probeId === base.probeId);
 
     lines.push(`  Probe [${base.probeId}]: ${base.request.method} ${base.request.path}`);
+    if (base.attempts && base.attempts > 1) {
+      lines.push(`    Attempts: Baseline ${base.attempts}, Candidate ${cand?.attempts || 1}`);
+    }
     lines.push(`    Baseline:  Status ${base.response?.statusCode ?? "ERR"} (${base.durationMs ?? 0}ms)`);
     lines.push(`    Candidate: Status ${cand?.response?.statusCode ?? "ERR"} (${cand?.durationMs ?? 0}ms)`);
     if (base.response?.body !== undefined) {
@@ -138,6 +161,34 @@ export function formatBehaviorReport(report: RunReport): string {
   return lines.join("\n");
 }
 
+export function formatContractDiffReport(diff: ContractDiffResult): string {
+  const lines: string[] = [];
+
+  lines.push("  OPENAPI CONTRACT COMPARISON");
+  lines.push("  ===========================");
+  lines.push(`  Baseline:  ${diff.baselineTitle} (v${diff.baselineVersion})`);
+  lines.push(`  Candidate: ${diff.candidateTitle} (v${diff.candidateVersion})`);
+  lines.push("");
+  lines.push(`  Breaking:      ${diff.breakingCount}`);
+  lines.push(`  Risky:         ${diff.riskyCount}`);
+  lines.push(`  Compatible:    ${diff.changedCount}`);
+  lines.push("");
+  lines.push("  -------------------------------------------");
+
+  if (diff.deltas.length === 0) {
+    lines.push("  No contract differences detected between specifications.");
+  } else {
+    for (const d of diff.deltas) {
+      lines.push(`  [${d.severity.toUpperCase()}] ${d.id}: ${d.description}`);
+      lines.push(`    Path:   ${d.method ? `${d.method} ` : ""}${d.path}`);
+      lines.push(`    Kind:   ${d.kind}`);
+      lines.push("");
+    }
+  }
+
+  return lines.join("\n");
+}
+
 export function formatExplainDelta(delta: BehavioralDelta, runId: string): string {
   const lines: string[] = [];
 
@@ -147,9 +198,15 @@ export function formatExplainDelta(delta: BehavioralDelta, runId: string): strin
   lines.push(`  Identifier:   ${delta.id}`);
   lines.push(`  Title:        ${delta.title}`);
   lines.push(`  Severity:     ${delta.severity.toUpperCase()}`);
-  lines.push(`  Confidence:   ${delta.confidence * 100}% (deterministic observed execution)`);
+  if (delta.verdict) {
+    lines.push(`  Verdict:      ${delta.verdict.toUpperCase().replace(/_/g, " ")}`);
+  }
+  lines.push(`  Confidence:   ${delta.confidence * 100}%`);
   lines.push(`  Endpoint:     ${delta.before.request.method} ${delta.before.request.path}`);
   lines.push(`  Surface:      ${delta.surface.join(", ")}`);
+  if (delta.motivatedBy) {
+    lines.push(`  Motivated By: Contract Delta ${delta.motivatedBy}`);
+  }
   lines.push("");
   lines.push("  Baseline Observation:");
   lines.push(`    Revision:    ${delta.before.revision}`);
@@ -183,7 +240,7 @@ export function formatExplainDelta(delta: BehavioralDelta, runId: string): strin
   lines.push("    This finding is directly derived from executed HTTP probes against baseline and candidate revisions.");
   lines.push("");
   lines.push("  Limitations:");
-  lines.push("    Phase 0 compares HTTP responses observed via configured probes.");
+  lines.push("    Phase 1 compares HTTP responses observed via configured & generated probes and OpenAPI contracts.");
   lines.push("    It does not infer external database side-effects or business-level consequences.");
   lines.push("");
   lines.push(`  Report Source: .whydiff/reports/${runId}/report.json`);

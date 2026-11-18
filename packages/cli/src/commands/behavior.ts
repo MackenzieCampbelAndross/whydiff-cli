@@ -3,6 +3,9 @@ import { CliError } from "../errors/cli-error.js";
 
 export interface BehaviorCommandOptions {
   config?: string;
+  openapiBaseline?: string;
+  openapiCandidate?: string;
+  authProfile?: string;
 }
 
 export async function runBehavior(revisionRange: string, options: BehaviorCommandOptions = {}): Promise<number> {
@@ -22,7 +25,10 @@ export async function runBehavior(revisionRange: string, options: BehaviorComman
     report = await engine.execute({
       config: loaded.config,
       rootDir: loaded.rootDir,
-      revisionRange
+      revisionRange,
+      openapiBaseline: options.openapiBaseline,
+      openapiCandidate: options.openapiCandidate,
+      authProfile: options.authProfile
     });
   } catch (err: unknown) {
     throw new CliError(`Behavior execution failed: ${(err as Error).message}`, 2);

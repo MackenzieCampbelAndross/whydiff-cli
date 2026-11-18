@@ -1,5 +1,6 @@
 import { Observation } from "../observations/types.js";
-import { BehavioralDelta, DeltaSeverity } from "../classification/types.js";
+import { BehavioralDelta } from "../classification/types.js";
+import { ContractDiffResult } from "../openapi/types.js";
 
 export interface RunMetadata {
   runId: string;
@@ -28,6 +29,13 @@ export interface RunMetadata {
     riskyCount: number;
     changedCount: number;
     informationalCount: number;
+    unverifiedCount?: number;
+    retriedProbes?: number;
+  };
+  contractDiff?: ContractDiffResult;
+  authProfilesUsed?: {
+    baseline?: string;
+    candidate?: string;
   };
 }
 
@@ -36,4 +44,5 @@ export interface RunReport {
   deltas: BehavioralDelta[];
   baselineObservations: Observation[];
   candidateObservations: Observation[];
+  contractDiff?: ContractDiffResult;
 }

@@ -52,5 +52,14 @@ export async function buildApp(): Promise<FastifyInstance> {
     };
   });
 
+  // 7. Secure profile (requires Bearer token)
+  app.get("/secure/profile", async (request, reply) => {
+    const authHeader = request.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      return reply.status(401).send({ error: "Unauthorized" });
+    }
+    return { user: "alice", role: "admin" };
+  });
+
   return app;
 }
