@@ -1,0 +1,14 @@
+{
+  "name": "fastify-regression-demo",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Demonstration API for WHYDIFF behavioral regression analysis",
+  "type": "module",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/server.js"
+  },
+  "dependencies": {
+    "fastify": "^5.2.1"
+  }
+}

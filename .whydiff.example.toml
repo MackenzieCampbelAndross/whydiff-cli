@@ -1,0 +1,37 @@
+# WHYDIFF Configuration Example (v0.1.0)
+version = 1
+
+[project]
+name = "example-fastify-api"
+framework = "fastify"
+
+[application]
+entrypoint = "src/app.ts"
+export = "buildApp"
+
+[comparison]
+timeout_ms = 10000
+include_headers = ["content-type", "cache-control"]
+ignore_headers = [
+  "date",
+  "x-request-id",
+  "etag",
+  "last-modified",
+  "transfer-encoding",
+  "connection",
+  "keep-alive"
+]
+
+[execution]
+install_dependencies = true
+cleanup_worktrees = true
+
+[probes]
+file = ".whydiff/probes.json"
+
+[report]
+directory = ".whydiff/reports"
+format = "terminal"
+
+[ci]
+fail_on = "breaking"

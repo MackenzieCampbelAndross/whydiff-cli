@@ -1,0 +1,44 @@
+{
+  "probes": [
+    {
+      "id": "probe-1-health",
+      "name": "Health check probe (unchanged)",
+      "method": "GET",
+      "path": "/health"
+    },
+    {
+      "id": "probe-2-users",
+      "name": "User profile probe (removed email field)",
+      "method": "GET",
+      "path": "/users/123"
+    },
+    {
+      "id": "probe-3-config",
+      "name": "Config probe (altered mode value)",
+      "method": "GET",
+      "path": "/config"
+    },
+    {
+      "id": "probe-4-orders",
+      "name": "Create order probe (status 201 -> 200)",
+      "method": "POST",
+      "path": "/orders",
+      "payload": {
+        "item": "widget",
+        "quantity": 1
+      }
+    },
+    {
+      "id": "probe-5-content",
+      "name": "Content probe (header cache-control changed)",
+      "method": "GET",
+      "path": "/content"
+    },
+    {
+      "id": "probe-6-billing",
+      "name": "Billing summary probe (endpoint throws error 500)",
+      "method": "GET",
+      "path": "/billing/summary"
+    }
+  ]
+}

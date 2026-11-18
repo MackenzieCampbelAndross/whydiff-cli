@@ -1,0 +1,23 @@
+{
+  "name": "whydiff-monorepo",
+  "version": "0.1.0",
+  "private": true,
+  "description": "WHYDIFF - Behavioral Change Detection and Verification Infrastructure",
+  "packageManager": "pnpm@12.21.0",
+  "scripts": {
+    "build": "pnpm -r --filter \"./packages/*\" run build",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:integration": "vitest run tests/integration",
+    "test:e2e": "vitest run tests/e2e",
+    "typecheck": "tsc --build --verbose",
+    "clean": "pnpm -r exec rm -rf dist"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.5",
+    "fastify": "^5.2.1",
+    "tsup": "^8.3.6",
+    "typescript": "^5.7.3",
+    "vitest": "^2.1.8"
+  }
+}

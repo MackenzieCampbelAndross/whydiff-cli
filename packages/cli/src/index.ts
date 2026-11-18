@@ -1,0 +1,7 @@
+export * from "./commands/init.js";
+export * from "./commands/diff.js";
+export * from "./commands/behavior.js";
+export * from "./commands/explain.js";
+export * from "./commands/report.js";
+export * from "./commands/ci.js";
+export * from "./errors/cli-error.js";
